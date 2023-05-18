@@ -1,0 +1,1039 @@
+//=============================================================================
+// Erebos_Synthesis.js
+// Author    : Erebos
+// version   : v1.00
+//=============================================================================
+
+/*:
+ * @target MV
+ * @plugindesc [MV] v1.00 道具合成系统
+ * @author Erebos
+ * 
+ * @help
+ * ————————————————————————————————————————————————————————————————————————
+ * 本插件为客制，具体请参考右侧插件参数。
+ * 用于合成系统的图像文件请存放于 img/system/synthesis/目录下
+ * 
+ * 在道具备注栏添加以下标签 将道具标记为素材：
+ * <synthesis material>
+ * 
+ * 
+ * 
+ * 
+ * 
+ * 
+ * ————————————————————————————————————————————————————————————————————————
+ * 请使用者遵守以下条款，谢谢！
+ * 1. 允许用于任何形式的商业或非商业用途，不要求注明作者。
+ * 2. 禁止以自己的名义作为插件作者二次发布、出售本插件。
+ * 3. 若本插件用于违反法律、公序良俗的作品，原作者不承担由此造成的后果。
+ * ——————————————————————————————————————————————————————————————————————————
+ * 
+ * 
+ * @param ==== 可合成道具列表 ====
+ * 
+ * @param synList
+ * @text 合成列表
+ * @parent ==== 可合成道具列表 ====
+ * @type struct<synList>[]
+ * @desc 可以合成的所有道具列表，在此编辑每种道具的配方
+ * 列表中的每一项表示一个目标物品
+ * @default []
+ * 
+ * @param
+ * 
+ * @param ==== 执行合成音效 ====
+ * 
+ * @param seProperty
+ * @parent ==== 执行合成音效 ====
+ * @text 合成音效参数
+ * @desc 指定执行合成时，需要播放的音效和其参数
+ * @type struct<seProperty>
+ * @default {"name":"","volume":"90","pitch":"100","pan":"0"}
+ * 
+ */
+/* ----------------------------------------------------------------------------
+ * Structure Setting for Type synList
+ * ----------------------------------------------------------------------------
+ */
+/*~struct~synList:
+ * 
+ * @param targetItem
+ * @text 目标物品
+ * @type item
+ * @desc 指定当前可合成的目标物品
+ * 
+ * @param needsList
+ * @text 素材物品列表
+ * @type item[]
+ * @desc 指定当前目标物品的素材，列表中的每一项都表示一个素材
+ * @default []
+ * 
+ * @param enableMap
+ * @text 可用地图
+ * @type string[]
+ * @desc 指定限制地图，玩家只有在指定的地图中时才可以合成此物
+ * 品，空白为任意地图可合成。(填地图名称，非显示名称)
+ * @default []
+ * 
+ * @param successRate
+ * @text 成功率
+ * @type number
+ * @desc 指定当前目标物品的成功率，最低0，最高100
+ *       50表示50%
+ * @default 100
+ * @min 0
+ * @max 100
+ * 
+ * @param failedResult
+ * @text 失败品
+ * @type item
+ * @desc 指定合成失败后获得的物品 (成功率会单独应用，
+ * E.g. 一次性合成10个物品，会计算判断10次成功率)
+ * @default 
+ * 
+ */ 
+/* ----------------------------------------------------------------------------
+ * Structure Setting for Se Property
+ * ----------------------------------------------------------------------------
+ */
+/*~struct~seProperty:
+ * 
+ * @param name
+ * @text 音效文件名
+ * @type file
+ * @dir audio/se/
+ * @desc 指定音效文件名 (audio/se/)
+ * @default Saint4
+ * 
+ * @param volume
+ * @text 音效音量
+ * @type number
+ * @desc 指定 执行合成时所播放的音效音量
+ *       默认：90
+ * @default 90
+ * @min 0
+ * @max 100
+ * 
+ * @param pitch
+ * @text 音效音调
+ * @type number
+ * @desc 指定 执行合成时所播放的音效音调
+ *       默认：100
+ * @default 100
+ * @min 50
+ * @max 150
+ * 
+ * @param pan
+ * @text 音效声像
+ * @type number
+ * @desc 指定 执行合成时所播放的音效声像
+ *       默认：0
+ * @default 0
+ * @min -100
+ * @max 100
+ * 
+ */
+
+
+// =========================================================================
+//         ImageManager to Preload Images for Synthesis
+// =========================================================================
+ImageManager.loadSynthesis = function(filename) {
+    return this.loadBitmap('img/system/synthesis/', filename, 0, false);
+};
+
+// =========================================================================
+//         Constructors for Scene_Synthesis
+// =========================================================================
+function Scene_Synthesis() {
+    this.initialize.apply(this, arguments);
+}
+
+// =========================================================================
+//         Constructors for Window_SynthesisList
+// =========================================================================
+function Window_SynthesisList() {
+    this.initialize.apply(this, arguments);
+}
+
+
+
+(function() {
+    // =========================================================================
+    //         Pre-process Data for Synthesis
+    // =========================================================================
+    Erebos.syn = {};
+    Erebos.synthesisInitialise = function() {
+        Erebos.syn.pluginParam = PluginManager.parameters('Erebos_Synthesis');
+
+        Erebos.syn.synList = JSON.parse(Erebos.syn.pluginParam['synList']) || [];
+
+        // ======== synthesis list
+        for (var a = 0; a < Erebos.syn.synList.length; a++) {
+            Erebos.syn.synList[a] = JSON.parse(Erebos.syn.synList[a]);
+            Erebos.syn.synList[a].id = a; // used for preventing duplication
+            Erebos.syn.synList[a].targetItem   = Number(Erebos.syn.synList[a].targetItem);
+            Erebos.syn.synList[a].needsList    = JSON.parse(Erebos.syn.synList[a].needsList);
+            Erebos.syn.synList[a].enableMap    = JSON.parse(Erebos.syn.synList[a].enableMap);
+            Erebos.syn.synList[a].successRate  = Number(Erebos.syn.synList[a].successRate);
+            Erebos.syn.synList[a].failedResult = Number(Erebos.syn.synList[a].failedResult);
+
+            for (let aa = 0; aa < Erebos.syn.synList[a].needsList.length; aa++) {
+                Erebos.syn.synList[a].needsList[aa] = Number(Erebos.syn.synList[a].needsList[aa]);
+            };
+        };
+        console.log(Erebos.syn.synList);
+
+        // ======== synthesis Sound
+        const seProperty = JSON.parse(Erebos.syn.pluginParam['seProperty']) || {};
+        Erebos.syn.okSe = {
+            name: String(seProperty.name) || '',
+            volume: Number(seProperty.volume) || 90,
+            pitch: Number(seProperty.pitch) || 100,
+            pan: Number(seProperty.pan) || 0
+        };
+
+    };
+
+    Erebos.synthesisInitialise();
+
+    // =========================================================================
+    //         Preload Images
+    // =========================================================================
+    const synItemBgImg = ImageManager.loadSynthesis('itemBg');
+    const synFoodBgImg = ImageManager.loadSynthesis('foodBg');
+    const synItemBoxImg = ImageManager.loadSynthesis('synItemBox');
+    const synItemBoxImg2 = ImageManager.loadSynthesis('synItemBox2');
+    const itemIconBgImg = ImageManager.loadSynthesis('iconBg');
+    const itemNumBgImg = ImageManager.loadSynthesis('itemNumBg');
+    const itemListBgImg = ImageManager.loadSynthesis('itemListBg');
+    const itemNameBgImg = ImageManager.loadSynthesis('itemNameBg');
+
+    const itemBookImg = ImageManager.loadSynthesis('itemBook');
+    const foodBookImg = ImageManager.loadSynthesis('foodBook');
+    const itemBookOpenImg = ImageManager.loadSynthesis('itemBookOpen');
+    const foodBookOpenImg = ImageManager.loadSynthesis('foodBookOpen');
+
+    const switchBtnSeleImg = ImageManager.loadSynthesis('switchBtn_sele');
+
+    const itemCursorImg = ImageManager.loadSynthesis('itemCursor');
+    const bookCursorImg = ImageManager.loadSynthesis('bookCursor');
+    const bookArrowImg = ImageManager.loadSynthesis('bookArrow');
+
+    // =========================================================================
+    //         Initialise Parameters
+    // =========================================================================
+
+    // =========================================================================
+    //         Initialize Synthesis
+    // =========================================================================
+    var Erebos_Synthesis_initialize = Scene_Menu.prototype.initialize;
+    Scene_Menu.prototype.initialize = function() {
+        Erebos_Synthesis_initialize.call(this);
+        this.synthesisMode = '';
+        this.synItemIndex = 0;
+        this.synBookIndex = 0;
+        this.targetInfo = null;
+    };
+
+    // =========================================================================
+    //         create Synthesis Ui
+    // =========================================================================
+    Scene_Menu.prototype.createSynthesisUi = function() {
+        // synthesis background
+        this.itemBg = new Sprite(synItemBgImg);
+        this.itemBg.opacity = 0;
+        this.addChild(this.itemBg);
+
+        this.foodBg = new Sprite(synFoodBgImg);
+        this.foodBg.opacity = 0;
+        this.addChild(this.foodBg);
+
+        // content display area
+        this.synArea = new Sprite(new Bitmap(1516, 1080));
+        this.synArea.x = 404;
+        this.synArea.opacity = 0;
+        this.addChild(this.synArea);
+
+        // item sele & target sele
+        this.synItemBox = new Sprite(synItemBoxImg);
+        this.synItemBox.y = 80;
+        this.synArea.addChild(this.synItemBox);
+
+        this.synTargetBox = new Sprite(synItemBoxImg2);
+        this.synTargetBox.y = 80;
+        this.synTargetBox.opacity = 0;
+        this.synArea.addChild(this.synTargetBox);
+
+        // item icon plate
+        this.icon = [];
+
+        this.iconNumBg = [];
+        this.iconNum = [];
+
+        this.itemNameBg = [];
+        this.itemNameTxt = [];
+
+        this.itemSlot = [];
+        for (var a = 0; a < 3; a++) {
+            this.icon[a] = new Sprite(new Bitmap(itemIconBgImg.width, itemIconBgImg.height));
+            this.icon[a].anchor.x = 0.5; this.icon[a].anchor.y = 0.5;
+            this.icon[a].x = (a === 0? 202 : a === 1? 491 : 796) + 72;
+            this.icon[a].y = 161 + 72;
+            this.synArea.addChild(this.icon[a]);
+
+            this.iconNumBg[a] = new Sprite(itemNumBgImg);
+            this.iconNumBg[a].anchor.x = 0.5; this.iconNumBg[a].anchor.y = 0.5;
+            this.iconNumBg[a].x = this.icon[a].x + 34 + 19;
+            this.iconNumBg[a].y = 267 + 19;
+            this.iconNumBg[a].visible = false;
+
+            this.iconNum[a] = new Sprite(new Bitmap(itemNumBgImg.width, itemNumBgImg.height));
+            this.iconNum[a].anchor.x = 0.5; this.iconNum[a].anchor.y = 0.5;
+            this.iconNum[a]._bitmap.fontSize = 24;
+            this.iconNumBg[a].addChild(this.iconNum[a]);
+
+            this.itemNameBg[a] = new Sprite(itemNameBgImg);
+            this.itemNameBg[a].anchor.x = 0.5;
+            this.itemNameBg[a].x = this.icon[a].x;
+            this.itemNameBg[a].y = 325;
+            this.itemNameBg[a].visible = false;
+            this.synArea.addChild(this.itemNameBg[a]);
+
+            this.itemNameTxt[a] = new Sprite(new Bitmap(itemNameBgImg.width, itemNameBgImg.height));
+            this.itemNameTxt[a].anchor.x = 0.5;
+            this.itemNameBg[a].addChild(this.itemNameTxt[a]);
+
+            this.itemSlot[a] = null;
+        };
+
+        // item list
+        this.listBg = new Sprite(itemListBgImg);
+        this.listBg.anchor.x = 0.5;
+        this.listBg.scale.y = 0;
+        this.listBg.x = this.icon[0].x;
+        this.listBg.y = 325;
+        this.listBg.active = false;
+        this.synArea.addChild(this.listBg);
+
+        this.listWindow = new Window_SynthesisList();
+        this.listWindow.x = -this.listBg.width / 2;
+        this.listBg.addChild(this.listWindow);
+
+        // item cursor
+        this.itemCursor = new Sprite(itemCursorImg);
+        this.itemCursor.anchor.x = 0.5; this.itemCursor.anchor.y = 0.5;
+        this.itemCursor.x = this.icon[0].x;
+        this.itemCursor.y = this.icon[0].y;
+        this.itemCursor.opacity = 0;
+        this.synArea.addChild(this.itemCursor);
+        this.iconNumBg.forEach(numBg => this.synArea.addChild(numBg)); // numebr rendered behind cursor
+
+        // switch button
+        this.switchBtnSele = new Sprite(switchBtnSeleImg);
+        this.switchBtnSele.anchor.x = 0.5; this.switchBtnSele.anchor.y = 0.5;
+        this.switchBtnSele.x = 74 + 35;
+        this.switchBtnSele.y = 197 + 35;
+        this.switchBtnSele.opacity = 0;
+        this.synArea.addChild(this.switchBtnSele);
+
+        // item food book
+        this.itemBook = new Sprite(itemBookImg);
+        this.itemBook.anchor.y = 1;
+        this.itemBook.x = 115;
+        this.itemBook.y = 1080;
+        this.synArea.addChild(this.itemBook);
+        
+        this.foodBook = new Sprite(foodBookImg);
+        this.foodBook.anchor.y = 1;
+        this.foodBook.x = 587;
+        this.foodBook.y = 1080;
+        this.synArea.addChild(this.foodBook);
+
+        this.itemBookOpen = new Sprite(itemBookOpenImg);
+        this.itemBookOpen.x = 5;
+        this.itemBookOpen.y = 1080;
+        this.itemBookOpen.opacity = 0;
+        this.synArea.addChild(this.itemBookOpen);
+
+        this.foodBookOpen = new Sprite(foodBookOpenImg);
+        this.foodBookOpen.x = 200;
+        this.foodBookOpen.y = 1080;
+        this.foodBookOpen.opacity = 0;
+        this.synArea.addChild(this.foodBookOpen);
+
+        // book cursor
+        this.bookCursor = new Sprite(bookCursorImg);
+        this.bookCursor.x = 115 - 7;
+        this.bookCursor.y = 630 - 7;
+        this.bookCursor.opacity = 0;
+        this.synArea.addChild(this.bookCursor);
+
+        this.bookArrow = new Sprite(bookArrowImg);
+        this.bookArrow.anchor.x = 0.5;
+        this.bookArrow.x = 115 + 205;
+        this.bookArrow.y = 630 - 20 - 79;
+        this.bookArrow.opacity = 0;
+        this.synArea.addChild(this.bookArrow);
+
+        // result
+        this.result = new Sprite(new Bitmap(400, 180));
+        this.result._bitmap.fontSize = 24;
+        this.result.x = 1120;
+        this.result.y = 160;
+        this.result.visible = false;
+        this.result.opacity = 0;
+        this.result.lastingFrame = 180;
+        this.synArea.addChild(this.result);
+    };
+
+    // =========================================================================
+    //         Interaction Functions
+    // =========================================================================
+    Scene_Menu.prototype.commandSynthesis = function() {
+        this.synthesisMode = 'itemSele';
+        this.synItemIndex = 0;
+        this.synBookIndex = 0;
+        this.targetInfo = null;
+    };
+
+    Scene_Menu.prototype.setItemSlot = function(item, index) {
+        if (item) {
+            if (this.synthesisMode === 'itemSele') { // item select mode
+                this.itemNameBg[index].visible = true;
+                const hasNum = $gameParty.numItems(item);
+                this.itemNameTxt[index].opacity = hasNum > 0? 255 : 178;
+                this.icon[index].opacity = hasNum > 0? 255 : 178;
+    
+                const nameBitmap = this.itemNameTxt[index]._bitmap;
+                nameBitmap.clear();
+                nameBitmap.drawText(item.name, 0, 0, nameBitmap.width, nameBitmap.height, "center");
+        
+                const iconBitmap = this.icon[index]._bitmap;
+                const iconImg = ImageManager.loadSynthesis("item" + item.id);
+                iconBitmap.clear();
+                var iconIntervalId = setInterval(() => {
+                    if (iconImg.isReady()) {
+                        iconBitmap.blt(iconImg, 0, 0, iconBitmap.width, iconBitmap.height, 0, 0);
+                        clearInterval(iconIntervalId);
+                    }
+                }, 20);
+    
+                // check if target
+                this.itemSlot[index] = item;
+                if (this.itemSlot[0] && this.itemSlot[1] && this.itemSlot[0] !== this.itemSlot[1]) {
+                    const trgNameBmp = this.itemNameTxt[2]._bitmap;
+                    const trgIconBmp = this.icon[2]._bitmap;
+                    trgNameBmp.clear();
+                    trgIconBmp.clear();
+    
+                    this.targetInfo = Erebos.syn.synList.find((target) => {
+                        return target.needsList.includes(this.itemSlot[0].id) && target.needsList.includes(this.itemSlot[1].id);
+                    });
+                    if (this.targetInfo) {
+                        this.itemNameBg[2].visible = true;
+                        this.itemSlot[2] = $dataItems[this.targetInfo.targetItem];
+    
+                        if (this.targetInfo.enableMap.length > 0 && !this.targetInfo.enableMap.includes($dataMapInfos[$gameMap.mapId()].name)) {
+                            this.itemNameTxt[2].opacity = 178;
+                            this.icon[2].opacity = 178;
+                            this.itemSlot[2].enable = false;
+                            this.result._bitmap.clear();
+                            this.result._bitmap.drawText("当前场景无法合成该物品！", 0, 0, 400, 36, "left");
+                            this.result.visible = true;
+                        } else {
+                            if (this.icon[0].opacity === 255 && this.icon[1].opacity === 255) {
+                                this.itemNameTxt[2].opacity = 255;
+                                this.icon[2].opacity = 255;
+                                this.itemSlot[2].enable = true;
+                            } else {
+                                this.itemNameTxt[2].opacity = 178;
+                                this.icon[2].opacity = 178;
+                                this.itemSlot[2].enable = false;
+                            }
+                        };
+                        trgNameBmp.drawText(this.itemSlot[2].name, 0, 0, trgNameBmp.width, trgNameBmp.height, "center");
+                        
+                        const trgIconImg = ImageManager.loadSynthesis("item" + this.targetInfo.targetItem);
+                        var trgIntervalId = setInterval(() => {
+                            if (trgIconImg.isReady()) {
+                                trgIconBmp.blt(trgIconImg, 0, 0, trgIconBmp.width, trgIconBmp.height, 0, 0);
+                                clearInterval(trgIntervalId);
+                            }
+                        }, 20);
+                    } else {
+                        this.itemNameBg[2].visible = false;
+                        this.itemSlot[2] = null;
+                    };
+                }; // end of target check
+    
+                if (this.itemSlot[0] === this.itemSlot[1]) {
+                    this.itemNameBg[2].visible = false;
+                    this.itemNameTxt[2]._bitmap.clear();
+                    this.icon[2]._bitmap.clear();
+                    this.itemSlot[2] = null;
+                };
+
+            } else if (this.synthesisMode === 'targetSele') { // target select mode
+                this.itemSlot[0] = item;
+                this.targetInfo = Erebos.syn.synList.find((target) => target.targetItem === item.id);
+                this.itemSlot[1] = $dataItems[this.targetInfo.needsList[0]];
+                this.itemSlot[2] = $dataItems[this.targetInfo.needsList[1]];
+
+                var iconIntervalIdTarget = [];
+                for (let j = 0; j < 3; j++) {
+                    this.itemNameBg[j].visible = true;
+                    const nameBmp = this.itemNameTxt[j]._bitmap;
+                    const iconBmp = this.icon[j]._bitmap;
+                    nameBmp.clear();
+                    iconBmp.clear();
+                    
+                    if (j >= 1) { // materials
+                        const hasNum = $gameParty.numItems(this.itemSlot[j]);
+                        this.itemNameTxt[j].opacity = hasNum > 0? 255 : 178;
+                        this.icon[j].opacity = hasNum > 0? 255 : 178;
+                    };
+                    nameBmp.drawText(this.itemSlot[j].name, 0, 0, nameBmp.width, nameBmp.height, "center");
+                    const iconImg = ImageManager.loadSynthesis("item" + this.itemSlot[j].id);
+                    iconIntervalIdTarget[j] = setInterval(() => {
+                        if (iconImg.isReady()) {
+                            iconBmp.blt(iconImg, 0, 0, iconBmp.width, iconBmp.height, 0, 0);
+                            clearInterval(iconIntervalIdTarget[j]);
+                        }
+                    }, 20);
+                };
+
+                return (this.icon[1].opacity === 255 && this.icon[2].opacity === 255); // boolean to set number to 0 if no materials
+                
+            } // end of select mode check
+        }
+    };
+
+    Scene_Menu.prototype.clearItemSlot = function() {
+        for (var b = 0; b < 3; b++) {
+            this.itemNameBg[b].visible = false;
+            this.iconNumBg[b].visible = false;
+
+            this.icon[b]._bitmap.clear();
+            this.itemNameTxt[b]._bitmap.clear();
+            this.iconNum[b]._bitmap.clear();
+        }
+    };
+
+    Scene_Menu.prototype.setNumber = function() {
+        if (this.number !== null && this.number !== undefined) {
+            for (const num of this.iconNum) {
+                num._bitmap.clear();
+                num._bitmap.drawText(this.number, 0, 0, num._bitmap.width, num._bitmap.height, "center");
+            }
+        }
+    };
+
+    Scene_Menu.prototype.executeSynthesis = function() {
+        if (this.previousMode === 'itemSele') {
+            $gameParty.loseItem(this.itemSlot[0], this.number, false);
+            $gameParty.loseItem(this.itemSlot[1], this.number, false);
+        } else {
+            $gameParty.loseItem(this.itemSlot[1], this.number, false);
+            $gameParty.loseItem(this.itemSlot[2], this.number, false);
+        };
+    
+        var success = 0;
+        var fail = 0;
+        for (var i = 0; i < this.number; i++) {
+            if (Math.random() * 100 < this.targetInfo.successRate) {
+                success++;
+            } else {
+                fail++;
+            }
+        };
+
+        const scene = this;
+        const successItem = $dataItems[this.targetInfo.targetItem];
+        const failItem = $dataItems[this.targetInfo.failedResult];
+        $gameParty.gainItem(successItem, success);
+        if (failItem) $gameParty.gainItem(failItem, fail);
+
+        setTimeout(() => {
+            scene.result._bitmap.clear();
+            scene.result._bitmap.drawText("合成成功 " + success + "次！", 0, 0, 400, 36, "left");
+            scene.result._bitmap.drawText("获得 " + successItem.name + "  x" + success, 0, 36, 400, 36, "left");
+
+            scene.result._bitmap.drawText("合成失败 " + fail + "次！", 0, 108, 400, 36, "left");
+            if (failItem) scene.result._bitmap.drawText("获得 " + failItem.name + "  x" + fail, 0, 144, 400, 36, "left");
+
+            scene.result.visible = true;
+            scene.setItemSlot(scene.itemSlot[0], 0);
+            if (scene.synthesisMode === 'itemSele') scene.setItemSlot(scene.itemSlot[1], 1);
+        }, 50);
+
+    };
+
+    // =========================================================================
+    //         Update Synthesis
+    // =========================================================================
+    var _Erebos_Synthesis_update = Scene_Menu.prototype.update;
+    Scene_Menu.prototype.update = function() {
+        _Erebos_Synthesis_update.call(this);
+
+        // update ui
+        if (this._commandWindow.currentSymbol() === 'synthesis') {
+            if (this.synArea.opacity < 255) {
+                this.synArea.opacity += 51;
+            };
+            this._statusWindow.visible = false;
+            if (this.synthesisMode === 'itemSele' && this.synItemBox.opacity < 255) this.synItemBox.opacity += 51;
+            if (this.synthesisMode === 'targetSele' && this.synTargetBox.opacity < 255) this.synTargetBox.opacity += 51;
+        } else {
+            if (this.synArea.opacity > 0) this.synArea.opacity -= 51;
+            this._statusWindow.visible = true;
+        };
+
+        // update input
+        if (this.synthesisMode === 'itemSele') { // item select mode
+            if (!this.listBg.active) { // list is not active
+                if (Input.isTriggered('right') || Input.isRepeated('right')) {
+                    SoundManager.playCursor();
+                    this.synItemIndex ++;
+                    if (this.synItemIndex > 2) this.synItemIndex = -1;
+                };
+                if (Input.isTriggered('left') || Input.isRepeated('left')) {
+                    SoundManager.playCursor();
+                    this.synItemIndex --;
+                    if (this.synItemIndex < -1) this.synItemIndex = 2;
+                };
+                if (Input.isTriggered('ok')) {
+                    if (this.synItemIndex === -1) { // switch mode
+                        SoundManager.playOk();
+                        this.synItemBox.opacity = 0;
+                        this.synthesisMode = 'targetSele';
+                        this.clearItemSlot();
+                        this.itemSlot.forEach((item, index) => this.itemSlot[index] = null);
+                    } else if (this.synItemIndex !== 2) { // activate list
+                        SoundManager.playOk();
+                        this.listBg.active = true;
+                        this.listWindow.refresh(false);
+                        this.listWindow.select(0);
+                        this.listWindow.active = true;
+                    } else { // activate number select
+                        if (this.itemSlot[2] && this.itemSlot[2].enable) {
+                            SoundManager.playOk();
+                            this.iconNumBg.forEach(bg => bg.visible = true);
+                            this.previousMode = 'itemSele';
+                            this.synthesisMode = 'numberInput';
+                            this.number = 1;
+                            this.setNumber();
+                        } else SoundManager.playBuzzer();
+                    }
+                };
+                if (Input.isTriggered('cancel')) { // exit
+                    SoundManager.playCancel();
+                    this.itemCursor.opacity = 0;
+                    this.switchBtnSele.opacity = 0;
+                    this.synthesisMode = '';
+                    this.clearItemSlot();
+                    this._commandWindow.activate();
+                    return;
+                };
+                if (Input.isTriggered('down')) { // to book
+                    SoundManager.playCursor();
+                    this.previousMode = 'itemSele';
+                    this.synthesisMode = 'bookSele';
+                };
+            } else { // list is active
+                if (this.listBg.scale.y < 1) this.listBg.scale.y += 0.1;
+                if (this.listBg.scale.y > 1) this.listBg.scale.y = 1;
+
+                if (Input.isTriggered('ok')) {
+                    SoundManager.playOk();
+                    this.setItemSlot(this.listWindow.list[this.listWindow._index], this.synItemIndex);
+                    this.listBg.active = false;
+                    this.listWindow.active = false;
+                };
+                if (Input.isTriggered('cancel')) {
+                    SoundManager.playCancel();
+                    this.listBg.active = false;
+                    this.listWindow.active = false;
+                };
+            }; // end of list active check
+
+            if (this.synthesisMode !== '') {
+                if (this.synItemIndex === -1) {
+                    this.switchBtnSele.opacity = 255;
+                    this.itemCursor.opacity = 0;
+                } else {
+                    this.switchBtnSele.opacity = 0;
+                    this.itemCursor.opacity = 255;
+                    this.itemCursor.x = this.icon[this.synItemIndex].x;
+                }
+            };
+            this.bookCursor.opacity = 0;
+
+        } else if (this.synthesisMode === 'bookSele') {
+            this.switchBtnSele.opacity = 0;
+            this.itemCursor.opacity = 0;
+            this.bookCursor.opacity = 255;
+
+            if (Input.isTriggered('right')) {
+                if (this.synBookIndex !== 1) {
+                    SoundManager.playCursor();
+                    this.synBookIndex = 1;
+                }
+            };
+            if (Input.isTriggered('left')) {
+                if (this.synBookIndex !== 0) {
+                    SoundManager.playCursor();
+                    this.synBookIndex = 0;
+                }
+            };
+            if (Input.isTriggered('ok')) {
+                SoundManager.playOk();
+                this.synthesisMode = 'bookOpen';
+                this.synBookEnable = false;
+            };
+            if (Input.isTriggered('up')) { // to item
+                SoundManager.playCursor();
+                this.synthesisMode = this.previousMode;
+                this.previousMode = '';
+            };
+            if (Input.isTriggered('cancel')) { // exit
+                SoundManager.playCancel();
+                this.bookCursor.opacity = 0;
+                this.synthesisMode = '';
+                this.clearItemSlot();
+                this._commandWindow.activate();
+                return;
+            };
+
+        } else if (this.synthesisMode === 'bookOpen') {
+            if (this.synBookIndex === 0) { // item book open
+                if (this.itemBook.opacity > 0) {
+                    this.itemBook.opacity -= 25.5;
+                    this.foodBook.x += 36;
+                    this.foodBook.y += 10;
+                } else if (this.itemBookOpen.opacity < 255) {
+                    this.itemBg.opacity += 17.8;
+                    this.itemBookOpen.opacity += 25.5;
+                    this.itemBookOpen.y -= 58.3;
+                } else if (this.itemBookOpen.opacity === 255) {
+                    this.itemBookOpen.y = 497;
+                    this.synBookEnable = true;
+                };
+            } else { // food book open
+                if (this.foodBook.opacity > 0) {
+                    this.foodBook.opacity -= 25.5;
+                    this.itemBook.x -= 16;
+                    this.itemBook.y += 10;
+                } else if (this.foodBookOpen.opacity < 255) {
+                    this.foodBg.opacity += 17.8;
+                    this.foodBookOpen.opacity += 25.5;
+                    this.foodBookOpen.y -= 58.3;
+                } else if (this.foodBookOpen.opacity === 255) {
+                    this.foodBookOpen.y = 497;
+                    this.synBookEnable = true;
+                };
+            }; // end of book index check
+            this.bookCursor.opacity = 0;
+
+            if (this.synBookEnable) {
+                if (Input.isTriggered('cancel')) {
+                    SoundManager.playCancel();
+                    this.synthesisMode = 'bookClosing';
+                };
+            };
+            
+        } else if (this.synthesisMode === 'bookClosing') {
+            if (this.synBookIndex === 0) { // item book close
+                if (this.itemBookOpen.opacity > 0) {
+                    this.itemBg.opacity -= 17.8;
+                    this.itemBookOpen.opacity -= 25.5;
+                    this.itemBookOpen.y += 58.3;
+                } else if (this.itemBook.opacity < 255) {
+                    this.itemBookOpen.y = 1080;
+                    this.itemBook.opacity += 25.5;
+                    this.foodBook.x -= 36;
+                    this.foodBook.y -= 10;
+                } else if (this.itemBook.y === 1080 && this.synthesisMode !== 'bookSele') this.synthesisMode = 'bookSele';
+            } else { // food book close
+                if (this.foodBookOpen.opacity > 0) {
+                    this.foodBg.opacity -= 17.8;
+                    this.foodBookOpen.opacity -= 25.5;
+                    this.foodBookOpen.y += 58.3;
+                } else if (this.foodBook.opacity < 255) {
+                    this.foodBookOpen.y = 1080;
+                    this.foodBook.opacity += 25.5;
+                    this.itemBook.x += 16;
+                    this.itemBook.y -= 10;
+                } else if (this.foodBook.y === 1080 && this.synthesisMode !== 'bookSele') this.synthesisMode = 'bookSele';
+            }
+
+        } else if (this.synthesisMode === 'targetSele') { // target select mode
+            if (!this.listBg.active) { // list is not active
+                if (Input.isTriggered('right') || Input.isRepeated('right')) {
+                    SoundManager.playCursor();
+                    this.synItemIndex ++;
+                    if (this.synItemIndex > 2) this.synItemIndex = -1;
+                };
+                if (Input.isTriggered('left') || Input.isRepeated('left')) {
+                    SoundManager.playCursor();
+                    this.synItemIndex --;
+                    if (this.synItemIndex < -1) this.synItemIndex = 2;
+                };
+                if (Input.isTriggered('ok')) {
+                    if (this.synItemIndex === -1) { // switch mode
+                        SoundManager.playOk();
+                        this.synTargetBox.opacity = 0;
+                        this.synthesisMode = 'itemSele';
+                        this.clearItemSlot();
+                        this.itemSlot.forEach((item, index) => this.itemSlot[index] = null);
+                    } else if (this.synItemIndex === 0) { // activate list
+                        SoundManager.playOk();
+                        this.listBg.active = true;
+                        this.listWindow.refresh(true);
+                        this.listWindow.select(0);
+                        this.listWindow.active = true;
+                    } else SoundManager.playBuzzer();
+                };
+                if (Input.isTriggered('cancel')) { // exit
+                    SoundManager.playCancel();
+                    this.synTargetBox.opacity = 0;
+                    this.synItemBox.opacity = 255;
+                    this.itemCursor.opacity = 0;
+                    this.switchBtnSele.opacity = 0;
+                    this.synthesisMode = '';
+                    this.clearItemSlot();
+                    this._commandWindow.activate();
+                };
+                if (Input.isTriggered('down')) { // to book
+                    SoundManager.playCursor();
+                    this.previousMode = 'targetSele';
+                    this.synthesisMode = 'bookSele';
+                };
+            } else { // list is active
+                if (this.listBg.scale.y < 1) this.listBg.scale.y += 0.1;
+                if (this.listBg.scale.y > 1) this.listBg.scale.y = 1;
+
+                if (Input.isTriggered('ok')) {
+                    if (this.listWindow.list[this.listWindow._index].enable) {
+                        SoundManager.playOk();
+                        const enough = this.setItemSlot(this.listWindow.list[this.listWindow._index], 0);
+                        this.listBg.active = false;
+                        this.listWindow.active = false;
+                        this.iconNumBg.forEach(bg => bg.visible = true);
+                        this.previousMode = 'targetSele';
+                        this.synthesisMode = 'numberInput';
+                        this.number = enough? 1 : 0;
+                        this.setNumber();
+                    } else SoundManager.playBuzzer();
+                };
+                if (Input.isTriggered('cancel')) {
+                    SoundManager.playCancel();
+                    this.listBg.active = false;
+                    this.listWindow.active = false;
+                };
+            }; // end of list active check
+
+            if (this.synthesisMode !== '') {
+                if (this.synItemIndex === -1) {
+                    this.switchBtnSele.opacity = 255;
+                    this.itemCursor.opacity = 0;
+                } else {
+                    this.switchBtnSele.opacity = 0;
+                    this.itemCursor.opacity = 255;
+                    this.itemCursor.x = this.icon[this.synItemIndex].x;
+                }
+            };
+            this.bookCursor.opacity = 0;
+
+        } else if (this.synthesisMode === 'numberInput') { // number select
+            if (Input.isTriggered('up') || Input.isRepeated('up')) {
+                var max;
+                if (this.previousMode === 'itemSele') max = Math.min($gameParty.numItems(this.itemSlot[0]), $gameParty.numItems(this.itemSlot[1]));
+                else max = Math.min($gameParty.numItems(this.itemSlot[1]), $gameParty.numItems(this.itemSlot[2]));
+                if (this.number < max) {
+                    SoundManager.playCursor();
+                    this.number++;
+                    this.setNumber();
+                }
+            };
+            if (Input.isTriggered('down') || Input.isRepeated('down')) {
+                if (this.number > 1) {
+                    SoundManager.playCursor();
+                    this.number--;
+                    this.setNumber();
+                }
+            };
+            if (Input.isTriggered('right') || Input.isRepeated('right')) {
+                var max;
+                if (this.previousMode === 'itemSele') max = Math.min($gameParty.numItems(this.itemSlot[0]), $gameParty.numItems(this.itemSlot[1]));
+                else max = Math.min($gameParty.numItems(this.itemSlot[1]), $gameParty.numItems(this.itemSlot[2]));
+                if (this.number < max) {
+                    SoundManager.playCursor();
+                    this.number += 10;
+                    if (this.number > max) this.number = max;
+                    this.setNumber();
+                }
+            };
+            if (Input.isTriggered('left') || Input.isRepeated('left')) {
+                if (this.number > 1) {
+                    SoundManager.playCursor();
+                    this.number -= 10;
+                    if (this.number < 1) this.number = 1;
+                    this.setNumber();
+                }
+            };
+            
+            if (Input.isTriggered('ok')) {
+                if (this.number > 0) {
+                    AudioManager.playSe(Erebos.syn.okSe);
+                    this.executeSynthesis();
+                    this.number = 1;
+                    this.iconNumBg.forEach(numBg => numBg.visible = false);
+                    this.synthesisMode = this.previousMode;
+                    this.previousMode = '';
+                } else SoundManager.playBuzzer();
+            };
+            if (Input.isTriggered('cancel')) {
+                SoundManager.playCancel();
+                this.number = 1;
+                this.iconNumBg.forEach(numBg => numBg.visible = false);
+                this.synthesisMode = this.previousMode;
+                this.previousMode = '';
+                if (this.synthesisMode === 'targetSele') {
+                    this.listBg.active = true;
+                    this.listWindow.activate(); // reselect
+                };
+            };
+
+        }; // end of mode
+
+        if (!this.listBg.active) { // keep updating
+            if (this.listBg.scale.y > 0) this.listBg.scale.y -= 0.1;
+            if (this.listBg.scale.y < 0) this.listBg.scale.y = 0;
+        };
+        if (this.synItemIndex >= 0) this.listBg.x = this.icon[this.synItemIndex].x;
+        this.bookCursor.x = this.synBookIndex === 0? this.itemBook.x - 7 : this.foodBook.x - 7;
+        this.bookArrow.x = this.synBookIndex === 0? this.itemBook.x + 205 : this.foodBook.x + 205;
+        this.bookArrow.opacity = this.bookCursor.opacity;
+
+        // update result
+        if (this.result.visible) {
+            if (this.result.lastingFrame > 0) {
+                if (this.result.opacity < 255) this.result.opacity += 51;
+                else this.result.lastingFrame--;
+            } else {
+                if (this.result.opacity > 0) this.result.opacity -= 51;
+                else {
+                    this.result.visible = false;
+                    this.result.lastingFrame = 180;
+                }
+            }
+        };
+
+    }; // end of update
+
+    // =========================================================================
+    //         Core Functions for Window_SynthesisList
+    // =========================================================================
+    Window_SynthesisList.prototype = Object.create(Window_Selectable.prototype);
+    Window_SynthesisList.prototype.constructor = Window_SynthesisList;
+
+    Window_SynthesisList.prototype.initialize = function() {
+        var width = this.windowWidth();
+        var height = this.windowHeight();
+        this.list = [];
+        this.targetSele = false;
+        Window_Selectable.prototype.initialize.call(this, 0, 0, width, height);
+        this.opacity = 0;
+        this.contents.fontSize = 24;
+    };
+    
+    Window_SynthesisList.prototype.windowWidth = function() {
+        return 324;
+    };
+    
+    Window_SynthesisList.prototype.windowHeight = function() {
+        return 212;
+    };
+
+    Window_SynthesisList.prototype.itemWidth = function() {
+        return 280;
+    };
+
+    Window_SynthesisList.prototype.itemHeight = function() {
+        return 44;
+    };
+
+    Window_SynthesisList.prototype.lineHeight = function() {
+        return 44;
+    };
+
+    Window_SynthesisList.prototype.maxItems = function() {
+        return this.list.length;
+    };
+
+    Window_SynthesisList.prototype.itemRect = function(index) {
+        var rect = new Rectangle();
+        rect.width = this.itemWidth();
+        rect.height = this.itemHeight();
+        rect.x = 4;
+        rect.y = index * rect.height - this._scrollY;
+        return rect;
+    };
+
+    Window_SynthesisList.prototype.refresh = function(isTargetSelect) {
+        this.list = [];
+        this.targetSele = isTargetSelect;
+        if (this.targetSele) {
+            Erebos.syn.synList.forEach((target, index) => {
+                this.list.push($dataItems[target.targetItem]);
+                if (target.enableMap.length > 0 && !target.enableMap.includes($dataMapInfos[$gameMap.mapId()].name)) this.list[index].enable = false;
+                else this.list[index].enable = true;
+            });
+        } else {
+            const isMaterial = /<synthesis material>/i;
+            this.list = $gameParty.items().filter((item) => item && isMaterial.test(item.note));
+        };
+        Window_Selectable.prototype.refresh.call(this);
+    };
+
+    Window_SynthesisList.prototype.drawItem = function(index) {
+        var rect = this.itemRect(index);
+        const item = this.list[index];
+        this.drawText(item.name, rect.x + 10, rect.y, rect.width - 20, "left");
+        this.drawText("x " + $gameParty.numItems(item), rect.x + 10, rect.y, rect.width - 20, "right");
+    };
+
+    Window_SynthesisList.prototype.select = function(index) {
+        this._index = index;
+        this._stayCount = 0;
+        this.ensureCursorVisible();
+        this.updateCursor();
+        if (this.targetSele) {
+            if (!this.list[index].enable) {
+                SceneManager._scene.result._bitmap.clear();
+                SceneManager._scene.result._bitmap.drawText("当前场景无法合成该物品！", 0, 0, 400, 36, "left");
+                SceneManager._scene.result.visible = true;
+                SceneManager._scene.result.opacity = 255;
+            } else {
+                SceneManager._scene.result.visible = false;
+                SceneManager._scene.result.opacity = 0;
+                SceneManager._scene.result.lastingFrame = 180;
+            }
+        };
+    };
+
+    Window_SynthesisList.prototype.setTopRow = function(row) {
+        var scrollY = row.clamp(0, this.maxTopRow()) * this.itemHeight();
+        if (this._scrollY !== scrollY) {
+            this._scrollY = scrollY;
+            this.refresh(this.targetSele);
+            this.updateCursor();
+        }
+    };
+
+}());
+// =========================================================================
+//         END OF FILE
+// =========================================================================
